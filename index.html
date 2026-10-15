@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI漫剧编剧人格测试 · 大众对AI漫剧剧情桥段偏好的测试与分析</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- ===== 顶部导航 ===== -->
+  <header class="topbar">
+    <div class="brand">🎬 AI漫剧编剧人格测试</div>
+    <nav>
+      <button class="nav-btn active" data-view="home" onclick="showView('home')">首页</button>
+      <button class="nav-btn" data-view="quiz" onclick="startTest()">开始测试</button>
+      <button class="nav-btn" data-view="analysis" onclick="showView('analysis')">数据分析</button>
+    </nav>
+  </header>
+
+  <main>
+
+    <!-- ===== 视图一：首页/课题介绍 ===== -->
+    <section id="view-home" class="view active">
+      <div class="hero">
+        <div class="hero-badge">抖音AI漫剧热梗灵感</div>
+        <h1>假如你是<span class="grad">AI漫剧编剧</span><br/>你最像哪一种题材的创作者？</h1>
+        <p class="hero-sub">
+          30道题，凭第一直觉选出你会写的剧情方案——<br/>
+          系统会从 <b>40个 AI 漫剧题材标签</b> 中找出<b>最像你的那个赛道</b>，
+          并附上一份<b>创作风格参考</b>（不一定被框死成一种流派）。
+        </p>
+        <div class="hero-actions">
+          <button class="btn btn-primary btn-lg" onclick="startTest()">🚀 开始测试（30题 · 题库 120 道随机抽取）</button>
+          <button class="btn btn-ghost btn-lg" onclick="showView('analysis')">📈 查看数据分析</button>
+        </div>
+      </div>
+
+      <div class="guide-box">
+        <h3>📜 问卷指导语</h3>
+        <p>
+          假如你是AI漫剧编剧，请凭<b>第一直觉</b>选出你会写的剧情方案，完成测试。<br/>
+          每题选项统一为 A / B / C / D。题目与选项顺序<b>每次随机</b>，请按直觉作答，不要纠结。
+        </p>
+      </div>
+
+      <h2 class="section-title">参考：四大创作风格</h2>
+      <p class="section-sub">仅作为风格参考，告诉你最常出现在哪些类型的剧本里。实际创作不一定被框死在一种风格。</p>
+      <div class="type-grid" id="home-types"></div>
+
+      <h2 class="section-title">40个AI漫剧题材标签</h2>
+      <p class="section-sub">测试结束后，系统会告诉你最匹配的题材标签（TOP 5 契合度排序）。</p>
+      <div class="tag-wall-switch">
+        <button class="chip active" data-ch="女" onclick="switchTagWall('女')">👩 女频 20</button>
+        <button class="chip" data-ch="男" onclick="switchTagWall('男')">👨 男频 20</button>
+      </div>
+      <div class="tag-wall" id="tag-wall"></div>
+
+      <h2 class="section-title">课题简介</h2>
+      <div class="intro-card">
+        <p>
+          抖音平台AI漫剧快速流行，不同创作者写出风格截然不同的剧本。本项目参考性格测试（MBTI）问卷形式设计选择题，
+          题目全部取材于AI漫剧经典桥段与真实题材标签。受试者根据自己的编剧直觉选择剧情走向，
+          系统据此归类出对应的编剧人格与题材赛道。
+        </p>
+        <p>
+          系统会收集问卷数据，统计不同编剧类型占比、题材标签热度与男女频偏好差异，
+          分析大众对于AI漫剧人设、反转、抽象玩梗桥段的审美倾向，探究AI漫剧吸引人的剧情特征。
+        </p>
+        <div class="intro-steps">
+          <span>① 30题随机作答</span><span>② 判定编剧人格</span><span>③ 匹配题材标签</span>
+          <span>④ 数据入库</span><span>⑤ 可视化分析</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 视图二：问卷测试 ===== -->
+    <section id="view-quiz" class="view">
+      <div class="quiz-progress-wrap">
+        <div class="quiz-progress-text" id="quiz-progress-text">第 1 / 30 题</div>
+        <div class="quiz-progress-track"><div class="quiz-progress-bar" id="quiz-progress"></div></div>
+      </div>
+      <div class="quiz-box" id="quiz-box"></div>
+    </section>
+
+    <!-- ===== 视图三：测试结果 ===== -->
+    <section id="view-result" class="view">
+      <div id="result-box"></div>
+    </section>
+
+    <!-- ===== 视图四：数据分析 ===== -->
+    <section id="view-analysis" class="view">
+      <h2 class="section-title">📈 测试数据分析</h2>
+      <p class="section-sub">数据保存在本机浏览器（localStorage），可用于课堂展示与统计报告。</p>
+
+      <div class="kpi-cards" id="kpi-cards"></div>
+
+      <div class="panel-grid">
+        <div class="panel">
+          <h3>创作风格参考分布 <small style="color:var(--muted);font-size:12px;">（四派分类仅供参考）</small></h3>
+          <div class="donut-wrap">
+            <div id="donut-chart"></div>
+            <div id="donut-legend" class="legend"></div>
+          </div>
+        </div>
+        <div class="panel" id="insights"></div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="panel">
+          <h3>题材标签热度榜 TOP 12</h3>
+          <div id="tag-rank"></div>
+        </div>
+        <div class="panel">
+          <h3>女频 / 男频偏好</h3>
+          <div id="channel-panel"></div>
+        </div>
+      </div>
+
+      <h3 class="sub-title">情景题选择分布（大众桥段审美）</h3>
+      <div id="scene-bars"></div>
+
+      <h3 class="sub-title">全部30题最热选项速览</h3>
+      <div id="q-summary" class="qsum-grid"></div>
+
+      <div class="data-actions">
+        <button class="btn btn-primary" onclick="loadDemoData()">🎲 载入示例数据（演示用）</button>
+        <button class="btn btn-ghost" onclick="exportCSV()">⬇️ 导出问卷数据 CSV</button>
+        <button class="btn btn-ghost" onclick="clearData()">🗑️ 清空本地数据</button>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    AI漫剧编剧人格测试 · 课题：大众对AI漫剧剧情桥段偏好的测试与分析
+  </footer>
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/analysis.js"></script>
+  <script>
+    /* 首页：四大风格预览（作为参考） */
+    document.getElementById("home-types").innerHTML = TYPE_ORDER.map((k) => {
+      const t = TYPES[k];
+      return `
+      <div class="type-card" style="--c:${t.color}">
+        <div class="type-emoji">${t.emoji}</div>
+        <h3>${t.name}</h3>
+        <div class="type-card-title">「${t.title}」</div>
+        <p>${t.desc}</p>
+        <div class="type-card-slogan">${t.lines}</div>
+      </div>`;
+    }).join("");
+
+    /* 首页：题材标签墙 */
+    function switchTagWall(ch) {
+      document.querySelectorAll(".tag-wall-switch .chip").forEach((b) => {
+        b.classList.toggle("active", b.dataset.ch === ch);
+      });
+      document.getElementById("tag-wall").innerHTML = TAGS.filter((t) => t.ch === ch).map((t) => `
+        <div class="tag-chip" style="--c:${TYPES[t.main].color}">
+          <div class="tag-chip-name">${t.name}<span class="tag-chip-main">${TYPES[t.main].emoji}${t.main}</span></div>
+          <div class="tag-chip-desc">${t.desc}</div>
+        </div>`).join("");
+    }
+    switchTagWall("女");
+  </script>
+</body>
+</html>
