@@ -36,7 +36,7 @@ const STORE_KEY = "aiDramaRecords";
 function loadRecords() {
   try {
     const all = JSON.parse(localStorage.getItem(STORE_KEY)) || [];
-    /* 仅保留新版格式（v=3，120 题库中抽 30 道） */
+    /* 仅保留新版格式（v=3，题库中抽 QUIZ_SIZE 道） */
     return all.filter((r) => r.v === 3 && Array.isArray(r.qids) && Array.isArray(r.picks) && r.qids.length === r.picks.length);
   } catch (e) {
     return [];
