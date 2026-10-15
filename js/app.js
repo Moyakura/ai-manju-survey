@@ -1,7 +1,34 @@
 /* ============================================================
  * AI漫剧编剧人格测试 - 测试主逻辑
- * 30题（10情景 + 20题材，标签每题出现2次，选项随机排序）
+ * 每轮测试：从 300 道题库中等概率随机抽取 30 道，
+ *           情景题与题材题按题库比例分层配额，选项顺序每次打乱。
  * ============================================================ */
+
+/* ============================================================
+ * 真随机：密码学安全随机数发生器（CSPRNG）
+ * ------------------------------------------------------------
+ * Math.random() 是引擎内置的伪随机算法（V8 为 xorshift128+），
+ * 输出由内部状态递推而来，理论上可被预测，不适合做「抽题」这种
+ * 需要保证公平性的场景。这里改用浏览器 crypto.getRandomValues()，
+ * 它由操作系统熵池提供 randomness，并进一步用拒绝采样消除取模偏差，
+ * 使 [0, max) 内每个整数的概率严格相等。
+ * ============================================================ */
+const CRYPTO = window.crypto || window.msCrypto || null;
+
+/* 返回 [0, max) 区间内的均匀随机整数（拒绝采样，无取模偏差） */
+function randomInt(max) {
+  if (max <= 1) return 0;
+  if (CRYPTO && typeof CRYPTO.getRandomValues === "function") {
+    /* 取 2^32 以内最大的 max 的倍数作为接受区上界，落在丢弃区的数重抽 */
+    const bound = Math.floor(0x100000000 / max) * max;
+    const buf = new Uint32Array(1);
+    let v;
+    do { CRYPTO.getRandomValues(buf); v = buf[0]; } while (v >= bound);
+    return v % max;
+  }
+  /* 极老浏览器（无 Web Crypto）兜底：退化为伪随机，保证功能可用 */
+  return Math.floor(Math.random() * max);
+}
 
 const STORE_KEY = "aiDramaRecords";
 
@@ -29,10 +56,11 @@ function formatDate(ts) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/* 洗牌：自下而上的 Fisher-Yates，n! 种排列等概率出现 */
 function shuffle(arr) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = randomInt(i + 1);
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
@@ -53,49 +81,91 @@ function showView(name) {
 }
 
 /* ---------- 测试状态 ---------- */
-let order = [];         /* 本轮呈现顺序（题库下标，从 120 题中随机抽 30） */
+let order = [];         /* 本轮呈现顺序（题库下标，从题库随机抽 30） */
 let displayOrder = {};  /* { 题库下标: [选项原始下标的呈现顺序] } */
 let answers = {};       /* { 题库下标: 选项原始下标 } */
 let currentQ = 0;
 
-/* 从 120 题库抽取 size 道题：
- *   1) 题干（scene）互不相同
- *   2) 选项文字在一轮 30 题内互不重复
- * 逐级放宽约束，保证一定能取满 size 道 */
+/* 题库分层：情景题（测人格）与题材题（定标签）分开抽，各自内部等概率 */
+const SCENE_POOL = QUESTIONS.map((q, i) => (q.type === "scene" ? i : -1)).filter((i) => i >= 0);
+const THEME_POOL = QUESTIONS.map((q, i) => (q.type === "theme" ? i : -1)).filter((i) => i >= 0);
+
+/* 判断一组题是否满足「题干互不重复 + 选项文字互不重复」 */
+function isCleanGroup(cand, usedScene, usedOpt) {
+  const s = new Set(usedScene);
+  const o = new Set(usedOpt);
+  for (const qi of cand) {
+    const q = QUESTIONS[qi];
+    if (s.has(q.scene)) return false;
+    s.add(q.scene);
+    for (const opt of q.options) {
+      if (o.has(opt.text)) return false;
+      o.add(opt.text);
+    }
+  }
+  return true;
+}
+
+/* 从某个分层里取 n 道互不冲突的题：
+ * 采用拒绝采样——每次都重新洗牌并重取一组，直到得到干净的一组为止。
+ * 由于每次都是完整的一次等概率抽样，被接受的结果在「满足约束的所有组合」上仍然等概率。 */
+function drawClean(pool, n, usedScene, usedOpt) {
+  /* 单次报样通过率约 94%，重抽 600 次后失败概率低于 10^-15，等价于零 */
+  for (let attempt = 0; attempt < 600; attempt++) {
+    const cand = shuffle(pool).slice(0, n);
+    if (isCleanGroup(cand, usedScene, usedOpt)) return cand;
+  }
+  /* 兜底（实际不会触发）：退化为随机贪心，先保证题干唯一 + 选项文字唯一 */
+  const pickGreedy = (careOpt) => {
+    const out = [];
+    const s = new Set(usedScene);
+    const o = new Set(usedOpt);
+    for (const qi of shuffle(pool)) {
+      if (out.length >= n) break;
+      if (s.has(QUESTIONS[qi].scene)) continue;
+      if (careOpt && QUESTIONS[qi].options.some((op) => o.has(op.text))) continue;
+      s.add(QUESTIONS[qi].scene);
+      QUESTIONS[qi].options.forEach((op) => o.add(op.text));
+      out.push(qi);
+    }
+    return out;
+  };
+  const full = pickGreedy(true);
+  if (full.length === n) return full;
+  return pickGreedy(false);
+}
+
+/* 从题库抽取 size 道：
+ *   1) 分层配额：情景题:题材题 保持与题库 1:2 的比例，两层各自等概率随机抽取
+ *   2) 抽中的一组题满足题干互不重复、选项文字互不重复 */
 function sampleQuestions(size) {
-  const idx = shuffle(QUESTIONS.map((_, i) => i));
+  const sceneN = Math.min(Math.round((size * SCENE_POOL.length) / QUESTIONS.length), SCENE_POOL.length);
+  const themeN = size - sceneN;
+
   const usedScene = new Set();
   const usedOpt = new Set();
-  const picked = [];
-  const taken = (qi) => picked.indexOf(qi) >= 0;
-
-  /* 第 1 轮：题干唯一 + 选项文字唯一 */
-  for (const qi of idx) {
-    if (picked.length >= size) break;
-    const q = QUESTIONS[qi];
-    if (usedScene.has(q.scene)) continue;
-    const texts = q.options.map((o) => o.text);
-    if (texts.some((t) => usedOpt.has(t))) continue;
-    usedScene.add(q.scene);
-    texts.forEach((t) => usedOpt.add(t));
-    picked.push(qi);
-  }
-  /* 第 2 轮：只保证题干唯一 */
-  if (picked.length < size) {
-    for (const qi of idx) {
-      if (picked.length >= size) break;
-      if (taken(qi) || usedScene.has(QUESTIONS[qi].scene)) continue;
+  const commit = (list) => {
+    list.forEach((qi) => {
       usedScene.add(QUESTIONS[qi].scene);
-      picked.push(qi);
-    }
-  }
-  /* 第 3 轮兜底：直接补足 */
+      QUESTIONS[qi].options.forEach((o) => usedOpt.add(o.text));
+    });
+  };
+
+  const scenePart = drawClean(SCENE_POOL, sceneN, usedScene, usedOpt);
+  commit(scenePart);
+  const themePart = drawClean(THEME_POOL, themeN, usedScene, usedOpt);
+  commit(themePart);
+
+  const picked = scenePart.concat(themePart);
+  /* 极端情况下补满题数 */
   if (picked.length < size) {
-    for (const qi of idx) {
+    const taken = new Set(picked);
+    for (const qi of shuffle(SCENE_POOL.concat(THEME_POOL))) {
       if (picked.length >= size) break;
-      if (!taken(qi)) picked.push(qi);
+      if (!taken.has(qi)) picked.push(qi);
     }
   }
+  /* 打乱题目呈现顺序（情景题与题材题交错呈现） */
   return shuffle(picked);
 }
 
@@ -212,13 +282,19 @@ function scoreAnswers(ans) {
   return { scores, chScore, tagVotes };
 }
 
-/* 主类型：得分最高者；同分时取更靠后的作答（更接近编制直觉） */
-function pickMainTypeFrom(scores, ans) {
-  let best = "F";
-  for (let i = order.length - 1; i >= 0; i--) {
-    const ai = ans[i];
-    if (ai === undefined) continue;
-    const t = QUESTIONS[i].options[ai].t;
+/* 主类型：得分最高者；同分时取更靠后作答的那一题所属类型（更接近编制直觉）
+ * qOrder：题目呈现顺序（题库下标数组）；缺省时按作答记录的下标升序回溯 */
+function pickMainTypeFrom(scores, ans, qOrder) {
+  const seq = Array.isArray(qOrder) && qOrder.length
+    ? qOrder.filter((qi) => ans[qi] !== undefined)
+    : Object.keys(ans).map(Number).filter((qi) => ans[qi] !== undefined).sort((a, b) => a - b);
+  if (!seq.length) return "F";
+
+  /* 自最后一题向前回溯，首次遇到更高分才替换 —— 平票时取更靠后的作答 */
+  let best = QUESTIONS[seq[seq.length - 1]].options[ans[seq[seq.length - 1]]].t;
+  for (let i = seq.length - 1; i >= 0; i--) {
+    const qi = seq[i];
+    const t = QUESTIONS[qi].options[ans[qi]].t;
     if (scores[t] > scores[best]) best = t;
   }
   return best;
@@ -258,7 +334,7 @@ function finishTest() {
     if (!confirm(`还有 ${unanswered} 题未作答，未作答题目不会计入结果。确定提交吗？`)) return;
   }
   const { scores, chScore, tagVotes } = scoreAnswers(answers);
-  const main = pickMainTypeFrom(scores, answers);
+  const main = pickMainTypeFrom(scores, answers, order);
   const rank = rankTags(scores, chScore, tagVotes);
   renderResult(scores, main, chScore, rank);
   showView("result");

@@ -185,19 +185,34 @@ function renderChannel(records) {
     <p class="ch-note">说明：频道得分按「每题该频道选项数量的倒数」加权，保证女频/男频选项数完全相等时的公平比较。</p>`;
 }
 
-/* ---------- 情景题选择分布（横向条形图） ---------- */
+/* ---------- 情景题选择分布（横向条形图） ----------
+ * 口径与「热门题目速览」一致：
+ *   · 只统计被作答过的题（未被抽到的题票数恒为 0，没有信息量）
+ *   · 按作答量倒序展示前 QBAR_LIMIT 道（卡片较高，故上限比速览更紧）
+ *   · 占比分母用该题的实际出现次数，而非问卷总数
+ * ------------------------------------------------------------------ */
+const QBAR_LIMIT = 20;
+
 function renderSceneBars(records) {
   const box = document.getElementById("scene-bars");
   if (!records.length) { box.innerHTML = `<div class="empty-tip">暂无数据</div>`; return; }
   const m = countOptions(records);
-  const total = records.length;
 
-  box.innerHTML = QUESTIONS.map((q, qi) => {
-    if (q.type !== "scene") return "";
-    const max = Math.max(...m[qi], 1);
+  const allScene = QUESTIONS.filter((q) => q.type === "scene").length;
+  const done = QUESTIONS.map((q, qi) => {
+    const votes = m[qi].reduce((a, b) => a + b, 0);
+    return { qi, q, votes };
+  }).filter((x) => x.q.type === "scene" && x.votes > 0).sort((a, b) => b.votes - a.votes);
+  if (!done.length) { box.innerHTML = `<div class="empty-tip">暂无数据</div>`; return; }
+
+  const shown = done.slice(0, QBAR_LIMIT);
+  const tip = `<div class="empty-tip">共 ${allScene} 道情景题，其中 ${done.length} 道被作答过；下方为作答量最高的 ${shown.length} 道</div>`;
+
+  box.innerHTML = tip + shown.map(({ qi, q, votes }) => {
+    const max = Math.max(...m[qi]);
     const rows = q.options.map((opt, oi) => {
       const n = m[qi][oi];
-      const pct = Math.round((n / total) * 100);
+      const pct = Math.round((n / votes) * 100);
       const isTop = n === max && n > 0;
       return `
         <div class="qbar-row ${isTop ? "top" : ""}">
@@ -207,21 +222,41 @@ function renderSceneBars(records) {
           <span class="qbar-val">${n}票 · ${pct}%</span>
         </div>`;
     }).join("");
-    return `<div class="qbar-card"><div class="qbar-head">${q.scene}</div>${rows}</div>`;
+    return `<div class="qbar-card">
+      <div class="qbar-head">
+        <span class="qbar-no">第${qi + 1}题</span>
+        <span class="qbar-scene">${q.scene}</span>
+        <span class="qbar-meta">${votes}人作答</span>
+      </div>${rows}
+    </div>`;
   }).join("");
 }
 
-/* ---------- 全部题目最热选项速览 ---------- */
+/* ---------- 题目最热选项速览 ----------
+ * 题库共 300 道，而每人只答 30 道，未被抽到的题票数恒为 0、没有信息量，
+ * 因此这里只统计「被作答过」的题目，并按作答量倒序展示前 QSUM_LIMIT 道。
+ * 占比分母用该题的实际出现次数（而非问卷总数），否则会被系统性低估。
+ * ------------------------------------------------------------------ */
+const QSUM_LIMIT = 30;
+
 function renderQuestionSummary(records) {
   const box = document.getElementById("q-summary");
   if (!records.length) { box.innerHTML = `<div class="empty-tip">暂无数据</div>`; return; }
   const m = countOptions(records);
-  const total = records.length;
 
-  box.innerHTML = QUESTIONS.map((q, qi) => {
+  const done = QUESTIONS.map((q, qi) => {
+    const votes = m[qi].reduce((a, b) => a + b, 0);
+    return { qi, q, votes };
+  }).filter((x) => x.votes > 0).sort((a, b) => b.votes - a.votes);
+  if (!done.length) { box.innerHTML = `<div class="empty-tip">暂无数据</div>`; return; }
+
+  const shown = done.slice(0, QSUM_LIMIT);
+  const tip = `<div class="empty-tip">共有 ${done.length} / ${POOL_SIZE} 道题被作答过，下方为作答量最高的 ${shown.length} 道</div>`;
+
+  box.innerHTML = tip + shown.map(({ qi, q, votes }) => {
     const bi = maxOptionOf(m[qi]);
     const n = m[qi][bi];
-    const pct = Math.round((n / total) * 100);
+    const pct = Math.round((n / votes) * 100);
     const opt = q.options[bi];
     return `<div class="qsum-card ${q.type}">
       <div class="qsum-head">
@@ -231,6 +266,7 @@ function renderQuestionSummary(records) {
       </div>
       <div class="qsum-q">${q.scene}</div>
       <div class="qsum-opt">${opt.text}</div>
+      <div class="qsum-votes">${votes}人作答 · 最热选项 ${n}票</div>
     </div>`;
   }).join("");
 }
@@ -324,7 +360,7 @@ function weightedPickIndex(weights, rnd) {
 }
 
 function loadDemoData() {
-  if (!confirm("将向本地数据中追加 40 份示例问卷（每份从 120 题库中随机抽 30 题），用于演示分析效果。是否继续？")) return;
+  if (!confirm("将向本地数据中追加 40 份示例问卷（每份从 " + POOL_SIZE + " 题库中随机抽 " + QUIZ_SIZE + " 题），用于演示分析效果。是否继续？")) return;
   const mainWeights = { F: 0.28, M: 0.3, T: 0.24, W: 0.18 };
   const mains = [];
   TYPE_ORDER.forEach((k) => { for (let i = 0; i < mainWeights[k] * 100; i++) mains.push(k); });
@@ -332,7 +368,7 @@ function loadDemoData() {
   for (let n = 0; n < 40; n++) {
     const main = mains[Math.floor(Math.random() * mains.length)];
     const nvBias = 0.35 + Math.random() * 0.3;   /* 0.35~0.65：个体频道倾向 */
-    /* 从 120 题库中随机抽 30 题 */
+    /* 从题库中随机抽 QUIZ_SIZE 题 */
     const qids = shuffle(QUESTIONS.map((_, i) => i)).slice(0, QUIZ_SIZE);
     const ans = {};
     qids.forEach((qi) => {
@@ -351,7 +387,7 @@ function loadDemoData() {
     saveRecord({
       v: 3,
       ts: Date.now() - Math.floor(Math.random() * 7 * 24 * 3600 * 1000),
-      type: pickMainTypeFrom(scores, ans),
+      type: pickMainTypeFrom(scores, ans, qids),
       qids: qids,
       picks: qids.map((qi) => ans[qi]),
       tags,
